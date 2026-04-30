@@ -1,0 +1,429 @@
+---
+title: "Obesity in America"
+subtitle: "Patterns in Nutrition, Physical Activity & Weight Status Across the United States"
+author: "Isaac Wilkey"
+date: today
+format:
+  revealjs:
+    theme: simple
+    slide-number: true
+    transition: fade
+    background-transition: fade
+    footer: "STAT 408 Final Project"
+    logo: ""
+    margin: 0.05
+    smaller: true
+    css: styles.css
+---
+
+## The Dataset: CDC BRFSS
+
+**Behavioral Risk Factor Surveillance System**
+
+- **Source:** Centers for Disease Control and Prevention (CDC) – DNPAO Data, Trends & Maps database
+- **Population:** U.S. adults aged 18+, all 50 states
+- **Coverage:** Multi-year panel with annual state estimates
+
+**Key Variables:**
+
+| Variable | Description |
+|---|---|
+| `YearStart` / `YearEnd` | Survey year |
+| `LocationDesc` | State |
+| `Data_Value` | Obesity prevalence (%) |
+| `StratificationCategory1` | Demographic dimension (Age, Sex, Income, Education, Race/Ethnicity) |
+| `Confidence_Limit_Low/High` | 95% confidence interval |
+| `Sample_Size` | Number of respondents |
+
+::: {.notes}
+The BRFSS is one of the most comprehensive behavioral health survey systems in the world. The CDC collects data annually from adults across every state using phone surveys. The DNPAO subset focuses specifically on diet, physical activity, and weight outcomes. Stratification variables let us break results down by gender, age, income, education, and race/ethnicity.
+:::
+
+---
+
+## Data Cleaning & Preparation
+
+:::: {.columns}
+
+::: {.column width="68%"}
+
+**01 — Type Conversion**
+Stripped commas and coerced `Sample_Size` and `Data_Value` to numeric
+
+**02 — Blank → NA**
+Replaced all empty string cells with `NA` for consistent missing-value handling
+
+**03 — Remove Flagged Values**
+Dropped rows where `Data_Value_Footnote` was not `NA` — these indicate suppressed or unreliable estimates
+
+**04 — Remove Missing Outcomes**
+Removed any remaining rows with a missing `Data_Value` (obesity %) to ensure clean analysis
+
+**05 — Drop Unused Columns**
+Removed `Data_Value_Type`, `Data_Value_Unit`, and two other metadata columns not needed for analysis
+
+:::
+
+::: {.column width="30%"}
+
+**Results**
+
+✔ Column names standardized via `make.names()`
+
+✔ 5 columns dropped
+
+✔ `Data_Value` is NA-free
+
+✔ Flagged/suppressed estimates removed
+
+:::
+
+::::
+
+::: {.notes}
+Walk through each of the five cleaning steps. The most important decisions were: (1) removing flagged footnote rows — these are estimates the CDC itself marks as unreliable, often due to small cell sizes; and (2) using make.names() to sanitize column headers so they work cleanly in R without backtick escaping. The type conversions were necessary because the CSV stored Sample_Size with comma separators, which R reads as character by default.
+:::
+
+---
+
+## Research Questions & Goals
+
+:::: {.columns}
+
+::: {.column width="50%"}
+
+**Geographic Variation**
+How do obesity rates differ across U.S. states? Are there regional clusters?
+→ *Choropleth Map*
+
+**Temporal Trends**
+How has the national average changed over time? Is the trend consistently upward?
+→ *Time-Trend Line Chart*
+
+:::
+
+::: {.column width="50%"}
+
+**Behavioral Predictors**
+Is there a measurable association between physical activity rates and obesity?
+→ *Scatter Plot + Regression*
+
+**Demographic Disparities**
+Do obesity rates differ significantly across age, sex, income, or education groups?
+→ *Grouped Bar Charts*
+
+:::
+
+::::
+
+::: {.notes}
+Four research questions guide this project. First, state-level geographic variation shown via choropleth. Second, time trends via a line chart. Third, physical activity as a behavioral predictor using regression. Fourth, demographic subgroup comparisons. I'll focus on the first three as they produce the most visually compelling results.
+:::
+
+---
+
+## Average Obesity Rate by State
+
+:::: {.columns}
+
+::: {.column width="70%"}
+
+```{r}
+#| echo: false
+#| warning: false
+library(tidyverse)
+
+#Data Cleaning
+data <- read.csv("STAT_408_Final_proj_data.csv")
+names(data) <- make.names(names(data))
+data$Sample_Size <- as.numeric(gsub(",", "", data$Sample_Size))
+data$Data_Value <- as.numeric(data$Data_Value)
+data[data == ""] <- NA
+data <- data |> filter(is.na(Data_Value_Footnote))
+
+#Adult obesity rate
+obesity_data <- data |>
+  filter(
+    Question == "Percent of adults aged 18 years and older who have obesity",
+    Stratification1 == "Total"
+  )
+
+#Grouping by State
+obesity_state <- obesity_data |>
+  group_by(LocationDesc) |>
+  summarize(avg_obesity = mean(Data_Value, na.rm = TRUE)) |>
+  arrange(desc(avg_obesity))
+
+#Bar Chart of Rates by State
+ggplot(obesity_state, aes(x = reorder(LocationDesc, avg_obesity), y = avg_obesity)) +
+  geom_col(fill = "#E8534A") +
+  coord_flip() +
+  labs(x = "State", y = "Obesity (%)") +
+  theme_minimal()
+```
+
+:::
+
+::: {.column width="30%"}
+
+**Highest**
+West Virginia: 37.9%
+
+**National Avg**
+31.3%
+
+**Range**
+22.9% – 37.9%
+
+:::
+
+::::
+
+::: {.notes}
+West Virginia leads at 37.9%, followed by Mississippi and Alabama. There's a clear southeastern pattern. The national average sits at 31.3%, so the states with the highest rates run about 6 percentage points above average.
+:::
+
+---
+
+## Obesity Rate by State — Geographic View
+
+```{r}
+#| echo: false
+#| warning: false
+#| fig-width: 10
+#| fig-height: 5
+library(maps)
+
+obesity_clean <- data |>
+  filter(
+    Question == "Percent of adults aged 18 years and older who have obesity",
+    StratificationCategory1 == "Total"
+  )
+
+obesity_state <- obesity_clean |>
+  group_by(LocationDesc) |>
+  summarize(avg_obesity = mean(Data_Value, na.rm = TRUE)) |>
+  mutate(region = tolower(LocationDesc))
+
+us_map <- map_data("state")
+
+map_data_combined <- us_map |>
+  left_join(obesity_state, by = "region")
+
+#Choropleth Map of Rate by State
+ggplot(map_data_combined, aes(long, lat, group = group, fill = avg_obesity)) +
+  geom_polygon(color = "white") +
+  coord_fixed(1.3) +
+  scale_fill_gradient(low = "lightblue", high = "#E8534A", na.value = "gray90") +
+  labs(fill = "Obesity (%)") +
+  theme_void()
+```
+
+::: {.notes}
+The choropleth makes the geographic clustering immediately obvious — the Southeast cluster jumps out visually in a way a bar chart cannot. Western states like Colorado and Hawaii consistently show the lowest rates, while the Midwest, Great Lakes and South have the highest rates
+:::
+
+---
+
+## Obesity Trend Over Time
+
+:::: {.columns}
+
+::: {.column width="80%"}
+
+```{r}
+#| echo: false
+#| warning: false
+obesity_trend <- obesity_data |>
+  group_by(YearStart) |>
+  summarize(avg_obesity = mean(Data_Value, na.rm = TRUE))
+
+ggplot(obesity_trend, aes(x = YearStart, y = avg_obesity)) +
+  geom_line(color = "#E8534A", linewidth = 1.2) +
+  geom_point(color = "#E8534A", size = 2.5) +
+  labs(x = "Year", y = "Average Obesity (%)") +
+  theme_minimal()
+```
+
+:::
+
+::: {.column width="20%"}
+
+**+4.9 pts**
+Rise across study period
+
+**↑ Consistent**
+No year showed a decline
+
+:::
+
+::::
+
+::: {.notes}
+The trend is continuously increasing — there is no year where the national average drops. From 2011 to 2022 the rate rose by roughly 4.9 percentage points. During this time period data collection methods remained consistent, so this can be seen as a real increase and not a measurement difference.
+:::
+
+---
+
+## Physical Activity vs. Obesity Rate by State
+
+:::: {.columns}
+
+::: {.column width="75%"}
+
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+library(ggrepel)
+
+obesity <- data |>
+  filter(
+    Question == "Percent of adults aged 18 years and older who have obesity",
+    StratificationCategory1 == "Total"
+  ) |>
+  group_by(LocationDesc) |>
+  summarize(obesity = mean(Data_Value, na.rm = TRUE))
+
+activity <- data |>
+  filter(
+    Question == "Percent of adults who achieve at least 150 minutes a week of moderate-intensity aerobic physical activity or 75 minutes a week of vigorous-intensity aerobic activity (or an equivalent combination)",
+    StratificationCategory1 == "Total"
+  ) |>
+  group_by(LocationDesc) |>
+  summarize(activity = mean(Data_Value, na.rm = TRUE))
+
+combined <- obesity |>
+  inner_join(activity, by = "LocationDesc")
+
+model <- lm(obesity ~ activity, data = combined)
+combined$residuals <- resid(model)
+threshold <- quantile(abs(combined$residuals), 0.95)
+outliers <- combined |> filter(abs(residuals) >= threshold)
+
+ggplot(combined, aes(x = activity, y = obesity)) +
+  geom_point(alpha = 0.6, color = "#0D7C8F") +
+  geom_smooth(method = "lm", se = TRUE, color = "#E8534A") +
+  geom_point(data = outliers, size = 2, color = "#E8534A") +
+  geom_text_repel(data = outliers, aes(label = LocationDesc), size = 3) +
+  labs(x = "Physical Activity Rate (%)", y = "Obesity Rate (%)") +
+  theme_minimal()
+```
+
+:::
+
+::: {.column width="25%"}
+
+**Key Finding**
+
+Negative relationship between physical activity and obesity
+
+States with higher activity rates tend to have lower obesity prevalence.
+
+**R ≈ −0.70**
+
+:::
+
+::::
+
+::: {.notes}
+The correlation is approximately −0.70, a moderately strong negative relationship. Outlier states labeled likely reflect con-founders like diet quality, food access, or socioeconomic factors that this simple bivariate model can't capture.
+:::
+
+---
+
+## Obesity Rates by Demographic Group
+
+:::: {.columns}
+
+::: {.column width="50%"}
+
+```{r}
+#| echo: false
+#| warning: false
+income_data <- data |>
+  filter(
+    Question == "Percent of adults aged 18 years and older who have obesity",
+    StratificationCategory1 == "Income"
+  ) |>
+  group_by(Stratification1) |>
+  summarize(avg_obesity = mean(Data_Value, na.rm = TRUE))
+
+ggplot(income_data, aes(x = Stratification1, y = avg_obesity)) +
+  geom_col(fill = "#1A2C5B") +
+  labs(title = "By Income Level", x = NULL, y = "Obesity (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+```
+
+:::
+
+::: {.column width="50%"}
+
+```{r}
+#| echo: false
+#| warning: false
+age_data <- data |>
+  filter(
+    Question == "Percent of adults aged 18 years and older who have obesity",
+    StratificationCategory1 == "Age (years)"
+  ) |>
+  group_by(Stratification1) |>
+  summarize(avg_obesity = mean(Data_Value, na.rm = TRUE))
+
+ggplot(age_data, aes(x = Stratification1, y = avg_obesity)) +
+  geom_col(fill = "#E8534A") +
+  labs(title = "By Age Group", x = NULL, y = "Obesity (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+```
+
+:::
+
+::::
+
+↓ Lower income → higher obesity (up to ~9 pt gap) &nbsp;&nbsp;&nbsp; ↑ Rates peak at 55–64, then dip slightly at 65+
+
+::: {.notes}
+The income chart shows a clear socioeconomic gradient with up to a 9-point gap between lowest and highest earners. The age chart peaks at 55–64, then dips slightly for 65+, possibly due to survival bias or even an increased medical management in older adults.
+:::
+
+---
+
+## Key Findings & Takeaways
+
+**01 — Strong Geographic Clustering**
+Southeastern states consistently show the highest obesity rates. West Virginia (37.9%) and Mississippi (37.1%) top the list. Western states generally rank lower.
+
+**02 — Consistent Upward Trend**
+National average obesity has risen every measured year, increasing by nearly 5 percentage points over the study period with no sign of leveling off.
+
+**03 — Activity Is a Negative Predictor**
+States with higher physical activity compliance rates have meaningfully lower obesity prevalence (r ≈ −0.70), though causation requires further study.
+
+**04 — Income Gradient Is Stark**
+Adults in the lowest income bracket face obesity rates nearly 10 points higher than the highest earners, underscoring the role of socioeconomic factors.
+
+::: {.notes}
+Four main takeaways: first geography matters as seen the Southeast is the region with the highest rates. Second the national trend is heading in the upward direction. Third physical activity is a significant correlate of lower obesity and lastly income inequality maps onto health inequality. Each points toward distinct places that can be targeted to improve these outcomes like regional investment, exercise infrastructure, and economic support programs.
+:::
+
+---
+
+## Conclusions & Next Steps
+
+- The U.S. obesity crisis is real, worsening, and geographically and socially unequal
+
+- Physical activity promotion may be a meaningful lever — higher-activity states fare better
+
+- Future work: multilevel models controlling for income, diet quality, and food environment simultaneously
+
+- Dashboard resource: [americashealthrankings.org](https://www.americashealthrankings.org/explore/measures/Obesity)
+
+<br>
+
+*Thank you — Questions?*
+
+::: {.notes}
+Closing summary: Overall, obesity is rising nationally, concentrated in the Southeast, correlated with lower physical activity and lower income. Future directions include multilevel models that jointly control for income, diet quality, and food environment. The America's Health Rankings dashboard is a great resource to explore this type of data further.
+:::
