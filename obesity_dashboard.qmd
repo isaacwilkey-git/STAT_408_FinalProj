@@ -1,0 +1,500 @@
+---
+title: "Obesity in America Dashboard"
+subtitle: "STAT 408 | Isaac Wilkey"
+format:
+  dashboard:
+    theme: cosmo
+    nav-buttons:
+      - icon: github
+        href: https://www.americashealthrankings.org/explore/measures/Obesity
+        aria-label: "America's Health Rankings"
+---
+
+```{r}
+#| label: setup
+#| include: false
+
+library(tidyverse)
+library(maps)
+library(ggrepel)
+
+# ── Load & clean data ────────────────────────────────────────────────────────
+data <- read.csv("STAT_408_Final_proj_data.csv")
+
+# Standardize column names
+names(data) <- make.names(names(data))
+
+# Type conversion
+data$Sample_Size <- as.numeric(gsub(",", "", data$Sample_Size))
+data$Data_Value  <- as.numeric(data$Data_Value)
+
+# Blank → NA
+data[data == ""] <- NA
+
+# Remove flagged / suppressed estimates
+df_clean <- data |> filter(is.na(Data_Value_Footnote))
+
+# Drop unused metadata columns
+df_clean <- df_clean[, -c(9, 10, 13, 14)]
+
+# Remove rows with missing outcome
+df_clean <- df_clean |> filter(!is.na(Data_Value))
+
+# ── Subsets used across pages ────────────────────────────────────────────────
+obesity_data <- df_clean |>
+  filter(
+    Question == "Percent of adults aged 18 years and older who have obesity",
+    StratificationCategory1 == "Total"
+  )
+
+activity_data <- df_clean |>
+  filter(
+    Question == "Percent of adults who achieve at least 150 minutes a week of moderate-intensity aerobic physical activity or 75 minutes a week of vigorous-intensity aerobic activity (or an equivalent combination)",
+    StratificationCategory1 == "Total"
+  )
+
+obesity_state <- obesity_data |>
+  group_by(LocationDesc) |>
+  summarize(avg_obesity = mean(Data_Value, na.rm = TRUE), .groups = "drop")
+
+activity_state <- activity_data |>
+  group_by(LocationDesc) |>
+  summarize(avg_activity = mean(Data_Value, na.rm = TRUE), .groups = "drop")
+
+combined <- inner_join(obesity_state, activity_state, by = "LocationDesc")
+
+# ── Shared ggplot theme ──────────────────────────────────────────────────────
+theme_dash <- function() {
+  theme_minimal(base_size = 13) +
+    theme(
+      plot.title    = element_text(face = "bold", size = 14),
+      plot.subtitle = element_text(color = "grey50", size = 11),
+      panel.grid.minor = element_blank(),
+      axis.title    = element_text(size = 11)
+    )
+}
+```
+
+# Dataset {icon="database"}
+
+## Row {height="25%"}
+
+```{r}
+#| content: valuebox
+#| title: "States & Territories"
+#| icon: map
+#| color: "#85C1E9"
+length(unique(df_clean$LocationDesc))
+```
+
+```{r}
+#| content: valuebox
+#| title: "Years of Data"
+#| icon: calendar
+#| color: "#2E86C1"
+paste0(min(df_clean$YearStart, na.rm=TRUE), " – ", max(df_clean$YearEnd, na.rm=TRUE))
+```
+
+```{r}
+#| content: valuebox
+#| title: "Unique Survey Questions"
+#| icon: clipboard
+#| color: "#E8534A"
+length(unique(df_clean$Question))
+```
+
+```{r}
+#| content: valuebox
+#| title: "Total Observations (cleaned)"
+#| icon: table
+#| color: "#4A6080"
+scales::comma(nrow(df_clean))
+```
+
+## Row {height="75%"}
+
+### Column {width="55%"}
+
+```{r}
+#| title: "About the Dataset"
+knitr::kable(
+  data.frame(
+    Field       = c("Source", "Survey", "Population", "Geography",
+                    "Demographic Breakdowns", "Key Outcome"),
+    Description = c(
+      "Centers for Disease Control and Prevention (CDC)",
+      "Behavioral Risk Factor Surveillance System (BRFSS) — DNPAO subset",
+      "U.S. adults aged 18 and older",
+      "All 50 states plus U.S. territories",
+      "Age, sex, income, education, race/ethnicity",
+      "Percent of adults with obesity (Data_Value)"
+    )
+  ),
+  col.names = c("Field", "Description")
+)
+```
+
+### Column {width="45%"}
+
+```{r}
+#| title: "Key Variables"
+knitr::kable(
+  data.frame(
+    Variable = c("YearStart / YearEnd", "LocationDesc", "Data_Value",
+                 "StratificationCategory1", "Stratification1",
+                 "Sample_Size", "Data_Value_Footnote",
+                 "Confidence_limit_Low / High"),
+    Description = c(
+      "Survey year range",
+      "State or territory name",
+      "Outcome percentage (e.g., obesity rate)",
+      "Demographic dimension (Total, Age, Sex, Income, Education, Race)",
+      "Specific stratum within category",
+      "Number of respondents (numeric after cleaning)",
+      "Flags suppressed / unreliable cells — removed during cleaning",
+      "95% confidence interval bounds"
+    )
+  ),
+  col.names = c("Variable", "Description")
+)
+```
+
+# Data Cleaning {icon="wrench"}
+
+## Row {height="30%"}
+
+```{r}
+#| content: valuebox
+#| title: "Step 1 — Type Conversion"
+#| icon: hash
+#| color: "#85C1E9"
+"Sample_Size & Data_Value"
+```
+
+```{r}
+#| content: valuebox
+#| title: "Step 2 — Blank → NA"
+#| icon: eraser
+#| color: "#2E86C1"
+"Blank -> NA"
+```
+
+```{r}
+#| content: valuebox
+#| title: "Step 3 — Remove Flagged Values"
+#| icon: flag
+#| color: "#E8534A"
+"Dropped unreliable estimates"
+```
+
+```{r}
+#| content: valuebox
+#| title: "Step 4 — Remove Missing Outcomes"
+#| icon: x-circle
+#| color: "#4A6080"
+"filter(!is.na())"
+```
+
+## Row {height="70%"}
+
+### Column {width="60%"}
+
+```{r}
+#| title: "Cleaning Steps Summary"
+knitr::kable(
+  data.frame(
+    Step = paste0("0", 1:5),
+    Action = c(
+      "Type Conversion",
+      "Blank → NA",
+      "Remove Flagged Values",
+      "Remove Missing Outcomes",
+      "Drop Unused Columns"
+    ),
+    Detail = c(
+      "Stripped commas and coerced Sample_Size and Data_Value to numeric using as.numeric(gsub(\",\", \"\", ...))",
+      "Replaced all empty string cells with NA for consistent missing-value handling across the dataset",
+      "Dropped rows where Data_Value_Footnote was not NA — these are estimates the CDC marks as suppressed or statistically unreliable (e.g. small cell sizes)",
+      "Removed any remaining rows with a missing Data_Value (obesity %) to ensure a fully observed outcome variable",
+      "Removed Data_Value_Type, Data_Value_Unit, and two other metadata columns (cols 9, 10, 13, 14) not needed for analysis"
+    ),
+    `R Code` = c(
+      'as.numeric(gsub(",", "", Sample_Size))',
+      'data[data == ""] <- NA',
+      'filter(is.na(Data_Value_Footnote))',
+      'filter(!is.na(Data_Value))',
+      'df_clean[, -c(9, 10, 13, 14)]'
+    )
+  ),
+  col.names = c("Step", "Action", "Detail", "R Code"),
+  align = c("c","l","l","l")
+)
+```
+
+### Column {width="40%"}
+
+```{r}
+#| title: "Rows Removed at Each Stage"
+removal_summary <- data.frame(
+  Stage = c(
+    "Raw data",
+    "After flagged rows removed",
+    "After missing Data_Value removed"
+  ),
+  Rows = c(
+    nrow(data),
+    nrow(data |> filter(is.na(Data_Value_Footnote))),
+    nrow(df_clean)
+  )
+) |>
+  mutate(
+    Removed = Rows - lag(Rows, default = first(Rows)),
+    Removed = ifelse(Removed == 0, "—", scales::comma(abs(Removed)))
+  )
+
+knitr::kable(
+  removal_summary,
+  col.names = c("Stage", "Rows Remaining", "Rows Removed"),
+  format.args = list(big.mark = ","),
+  align = c("l","r","r")
+)
+```
+
+# Analysis {icon="bar-chart"}
+
+## Row
+
+### Column {.tabset width="60%"}
+
+```{r}
+#| title: "Obesity Rate by State"
+obesity_state |>
+  arrange(desc(avg_obesity)) |>
+  mutate(LocationDesc = fct_reorder(LocationDesc, avg_obesity)) |>
+  ggplot(aes(x = LocationDesc, y = avg_obesity,
+             fill = avg_obesity > mean(avg_obesity))) +
+  geom_col(show.legend = FALSE) +
+  scale_fill_manual(values = c("#B8CCE0", "#E8534A")) +
+  coord_flip() +
+  labs(
+    title   = "Average Obesity Rate by State",
+    subtitle = "Red = above national average       Blue = below national average",
+    x = NULL,
+    y = "Avg Obesity (%)"
+  ) +
+  theme_dash()
+```
+
+```{r}
+#| title: "Choropleth Map"
+us_map <- map_data("state")
+
+map_joined <- us_map |>
+  left_join(
+    obesity_state |> mutate(region = tolower(LocationDesc)),
+    by = "region"
+  )
+
+ggplot(map_joined, aes(long, lat, group = group, fill = avg_obesity)) +
+  geom_polygon(color = "white", linewidth = 0.3) +
+  coord_fixed(1.3) +
+  scale_fill_gradient(
+    low = "lightblue", high = "#E8534A",
+    na.value = "grey85",
+    name = "Obesity (%)"
+  ) +
+  labs(
+    title    = "Average Obesity Rate by State",
+    subtitle = "Lighter = lower prevalence  |  Darker red = higher prevalence"
+  ) +
+  theme_void(base_size = 13) +
+  theme(
+    plot.title    = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(color = "grey50", size = 11),
+    legend.position = "bottom",
+    legend.key.width = unit(2, "cm")
+  )
+```
+
+```{r}
+#| title: "Trend Over Time"
+obesity_data |>
+  group_by(YearStart) |>
+  summarize(avg_obesity = mean(Data_Value, na.rm = TRUE), .groups = "drop") |>
+  ggplot(aes(x = YearStart, y = avg_obesity)) +
+  geom_line(color = "#E8534A", linewidth = 1.2) +
+  geom_point(color = "#E8534A", size = 2.5) +
+  scale_x_continuous(breaks = scales::pretty_breaks()) +
+  labs(
+    title    = "National Average Obesity Rate Over Time",
+    subtitle = "Consistently rising year over year",
+    x = "Year",
+    y = "Avg Obesity (%)"
+  ) +
+  theme_dash()
+```
+
+```{r}
+#| title: "Activity vs. Obesity"
+model    <- lm(avg_obesity ~ avg_activity, data = combined)
+combined$residuals <- resid(model)
+threshold <- quantile(abs(combined$residuals), 0.95)
+outliers  <- combined |> filter(abs(residuals) >= threshold)
+
+ggplot(combined, aes(x = avg_activity, y = avg_obesity)) +
+  geom_point(alpha = 0.6, color = "#1A2C5B", size = 2) +
+  geom_smooth(method = "lm", se = TRUE, color = "#E8534A", fill = "#E8534A", alpha = 0.15) +
+  geom_point(data = outliers, size = 3, color = "#0D7C8F") +
+  geom_text_repel(data = outliers, aes(label = LocationDesc), size = 3, color = "#0D7C8F") +
+  labs(
+    title    = "Physical Activity vs. Obesity Rate by State",
+    subtitle = "Teal labels = residual outliers  |  95% confidence band",
+    x = "Physical Activity Rate (%)",
+    y = "Obesity Rate (%)"
+  ) +
+  theme_dash()
+```
+
+### Column {width="40%"}
+
+```{r}
+#| title: "Summary Statistics"
+stats_df <- data.frame(
+  Measure = c(
+    "National avg obesity",
+    "Lowest state",
+    "Highest state",
+    "National avg activity",
+    "Lowest activity state",
+    "Highest activity state",
+    "Correlation (activity ~ obesity)"
+  ),
+  Value = c(
+    paste0(round(mean(obesity_state$avg_obesity), 1), "%"),
+    paste0(obesity_state$LocationDesc[which.min(obesity_state$avg_obesity)],
+           " (", round(min(obesity_state$avg_obesity), 1), "%)"),
+    paste0(obesity_state$LocationDesc[which.max(obesity_state$avg_obesity)],
+           " (", round(max(obesity_state$avg_obesity), 1), "%)"),
+    paste0(round(mean(activity_state$avg_activity), 1), "%"),
+    paste0(activity_state$LocationDesc[which.min(activity_state$avg_activity)],
+           " (", round(min(activity_state$avg_activity), 1), "%)"),
+    paste0(activity_state$LocationDesc[which.max(activity_state$avg_activity)],
+           " (", round(max(activity_state$avg_activity), 1), "%)"),
+    round(cor(combined$avg_activity, combined$avg_obesity), 2)
+  )
+)
+
+knitr::kable(stats_df, col.names = c("Measure", "Value"), align = c("l","r"))
+```
+
+# Findings {icon="check-circle"}
+
+## Row {height="20%"}
+
+```{r}
+#| content: valuebox
+#| title: "Geographic Pattern/Clustering"
+#| icon: geo-alt
+#| color: "#E8534A"
+"Southeast"
+```
+
+```{r}
+#| content: valuebox
+#| title: "National Trend"
+#| icon: arrow-up
+#| color: "#1A2C5B"
+paste0("+", round(max(obesity_data |> group_by(YearStart) |> summarize(m=mean(Data_Value,na.rm=TRUE)) |> pull(m)) - min(obesity_data |> group_by(YearStart) |> summarize(m=mean(Data_Value,na.rm=TRUE)) |> pull(m)), 1), " pts growth 2011-2022")
+```
+
+```{r}
+#| content: valuebox
+#| title: "Activity Correlation"
+#| icon: graph-down
+#| color: "#0D7C8F"
+paste0("r = ", round(cor(combined$avg_activity, combined$avg_obesity), 2))
+```
+
+```{r}
+#| content: valuebox
+#| title: "Income Gap"
+#| icon: currency-dollar
+#| color: "#4A6080"
+"~9 pt gap"
+```
+
+## Row {height="80%"}
+
+### Column {width="50%"}
+
+```{r}
+#| title: "Obesity by Income Level"
+income_data <- df_clean |>
+  filter(
+    Question == "Percent of adults aged 18 years and older who have obesity",
+    StratificationCategory1 == "Income"
+  ) |>
+  group_by(Stratification1) |>
+  summarize(avg_obesity = mean(Data_Value, na.rm = TRUE), .groups = "drop") |>
+  filter(!is.na(Stratification1)) |>
+  mutate(Stratification1 = factor(Stratification1, levels = c(
+    "Less than $15,000", "$15,000 - $24,999", "$25,000 - $34,999",
+    "$35,000 - $49,999", "$50,000 - $74,999", "$75,000 or greater"
+  )))
+
+ggplot(income_data, aes(x = Stratification1, y = avg_obesity, fill = avg_obesity)) +
+  geom_col(show.legend = FALSE) +
+  scale_fill_gradient(low = "#B8CCE0", high = "#E8534A") +
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 12)) +
+  labs(
+    title    = "Average Obesity Rate by Income Level",
+    subtitle = "Lower income → higher obesity prevalence",
+    x = "Income Bracket",
+    y = "Avg Obesity (%)"
+  ) +
+  theme_dash()
+```
+
+### Column {width="50%"}
+
+```{r}
+#| title: "Key Takeaways"
+knitr::kable(
+  data.frame(
+    `#`      = c("01", "02", "03", "04"),
+    Finding  = c(
+      "Strong Geographic Clustering",
+      "Consistent Upward Trend",
+      "Activity Is a Negative Predictor",
+      "Income Gradient Is Stark"
+    ),
+    Detail   = c(
+      "Southeastern states consistently show the highest obesity rates. West Virginia and Mississippi top the list; Western states generally rank lowest.",
+      "National average obesity has risen every measured year with no sign of leveling off — nearly 5 percentage points over the study period.",
+      "States with higher physical activity compliance rates have meaningfully lower obesity prevalence (r ≈ −0.68). Causation requires further study.",
+      "Adults in the lowest income bracket face obesity rates nearly 10 points higher than the highest earners, underscoring the socioeconomic dimension of this health crisis."
+    )
+  ),
+  col.names = c("#", "Finding", "Detail"),
+  align = c("c","l","l")
+)
+```
+
+```{r}
+#| title: "Further Resources"
+knitr::kable(
+  data.frame(
+    Resource = c(
+      "America's Health Rankings",
+      "CDC DNPAO Data Portal",
+      "CDC BRFSS Overview"
+    ),
+    URL = c(
+      "americashealthrankings.org/explore/measures/Obesity",
+      "cdc.gov/nccdphp/dnpao/data-trends-maps",
+      "cdc.gov/brfss"
+    )
+  ),
+  col.names = c("Resource", "URL")
+)
+```
